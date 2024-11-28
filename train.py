@@ -19,7 +19,7 @@ from sklearn.metrics import classification_report
 import pickle
 
 from utils import load_data, accuracy
-from models import GAT, SpGAT
+from model import GAT #, SpGAT
 
 # Training settings
 parser = argparse.ArgumentParser()
@@ -85,6 +85,8 @@ def train(epoch):
     acc_train = accuracy(output, torch.max(train_label,1)[1])
     loss_train.backward()
     optimizer.step()
+    # Print training loss and accuracy
+    print(f"Epoch {epoch+1}, Loss: {loss_train.item()}, Accuracy: {acc_train.item()}")
 
 def test_dict():
     pred_dict = dict()
@@ -137,10 +139,10 @@ if args.cuda:
     model.cuda()
     adj = adj.cuda()
 optimizer = optim.Adam(model.parameters(), 
-                   lr=l_r, 
+                   lr=args.lr, 
                    weight_decay=args.weight_decay)
 
 for epoch in range(args.epochs):
     train(epoch) 
 print("Optimization Finished!")
-results = test_dict()
+# results = test_dict()
