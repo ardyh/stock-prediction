@@ -49,15 +49,15 @@ if args.cuda:
 adj = load_data()
 stock_num = adj.size(0)
 
-train_price_path = "train_price/"
-train_label_path = "train_label/"
-train_text_path = "train_text/"
-val_price_path = "val_price/"
-val_label_path = "val_label/"
-val_text_path = "val_text/"
-test_price_path = "test_price/"
-test_label_path = "test_label/"
-test_text_path = "test_text/"
+train_price_path = "improv_data/train_price/"
+train_label_path = "improv_data/train_label/"
+train_text_path = "improv_data/train_text/"
+val_price_path = "improv_data/val_price/"
+val_label_path = "improv_data/val_label/"
+val_text_path = "improv_data/val_text/"
+test_price_path = "improv_data/test_price/"
+test_label_path = "improv_data/test_label/"
+test_text_path = "improv_data/test_text/"
 num_samples = len(os.listdir(train_price_path))
 import os
 import time
@@ -68,9 +68,7 @@ from sklearn.metrics import classification_report, matthews_corrcoef, accuracy_s
 from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
 import matplotlib.pyplot as plt
 
-cross_entropy = nn.CrossEntropyLoss(weight=torch.tensor([[1.00,1.00]]).cuda())
-
-
+cross_entropy = nn.CrossEntropyLoss(weight=torch.tensor([1.00,1.00]).cuda())
 
 def train(epoch):
     t = time.time()
@@ -90,11 +88,11 @@ def train(epoch):
 
 def test_dict():
     pred_dict = dict()
-    with open('label_data.p', 'rb') as fp:
+    with open('improv_data/label_data.p', 'rb') as fp:
         true_label = pickle.load(fp)
-    with open('price_feature_data.p', 'rb') as fp:
+    with open('improv_data/price_feature_data.p', 'rb') as fp:
         feature_data = pickle.load(fp)
-    with open('text_feature_data.p', 'rb') as fp:
+    with open('improv_data/text_feature_data.p', 'rb') as fp:
         text_ft_data = pickle.load(fp)
     model.eval()
     test_acc = []
@@ -145,4 +143,4 @@ optimizer = optim.Adam(model.parameters(),
 for epoch in range(args.epochs):
     train(epoch) 
 print("Optimization Finished!")
-# results = test_dict()
+results = test_dict()

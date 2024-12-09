@@ -13,7 +13,7 @@ def encode_onehot(labels):
 
 def load_data():
     print('Loading dataset...')
-    adj = np.load('graph.npy')
+    adj = np.load('improv_data/graph.npy')
     adj = sp.coo_matrix(adj, dtype=np.float32)
     adj = normalize_adj(adj + sp.eye(adj.shape[0]))
     adj = torch.FloatTensor(np.array(adj.todense()))
