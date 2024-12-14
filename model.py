@@ -83,11 +83,12 @@ class GAT(nn.Module):
         for i in range(price_input.size(0)):
             x = self.grup[i](price_input[i,:,:].reshape((1,num_d,pr_ft)))
             x = self.attnp[i](*x).reshape((1,64))
-            # x = self.layer_normp[i](x).reshape(1,64)
+            x = self.layer_normp[i](x).reshape(1,64)
             han_li1 = []
             for j in range(text_input.size(1)):
                 y = self.tweet_gru[i](text_input[i,j,:,:].reshape(1,num_tw,512))
                 y = self.attn_tweet[i](*y).reshape((1,64))
+                y = self.layer_normt[i](y).reshape(1,64)
                 han_li1.append(y)
             news_vector = torch.Tensor((1,num_d,64))
             news_vector = torch.cat(han_li1)
