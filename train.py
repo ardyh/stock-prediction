@@ -17,6 +17,8 @@ from sklearn.metrics import f1_score
 from sklearn.metrics import matthews_corrcoef, confusion_matrix
 from sklearn.metrics import classification_report
 import pickle
+import json
+from datetime import datetime
 
 from utils import load_data, accuracy
 from model import GAT #, SpGAT
@@ -70,9 +72,25 @@ import matplotlib.pyplot as plt
 
 cross_entropy = nn.CrossEntropyLoss(weight=torch.tensor([1.00,1.00]).cuda())
 
+# Create directories if they don't exist
+os.makedirs('model_checkpoints', exist_ok=True)
+os.makedirs('training_logs', exist_ok=True)
 
+# Create a unique identifier for this training run
+run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-def train(epoch):
+# Initialize a dictionary to store training metrics
+training_log = {
+    'epochs': [],
+    'train_loss': [],
+    'train_acc': [],
+    'best_f1': 0.0,
+    'best_mcc': 0.0,
+    'hyperparameters': vars(args)  # Save all hyperparameters
+}
+
+# 390 batches
+def train(epoch): # 777 mod 390 = [0 ]
     t = time.time()
     model.train()
     optimizer.zero_grad()
@@ -85,8 +103,8 @@ def train(epoch):
     acc_train = accuracy(output, torch.max(train_label,1)[1])
     loss_train.backward()
     optimizer.step()
-    # Print training loss and accuracy
-    print(f"Epoch {epoch+1}, Loss: {loss_train.item()}, Accuracy: {acc_train.item()}")
+    
+    return loss_train.item(), acc_train.item()
 
 def test_dict():
     pred_dict = dict()
@@ -142,7 +160,63 @@ optimizer = optim.Adam(model.parameters(),
                    lr=args.lr, 
                    weight_decay=args.weight_decay)
 
+best_f1 = 0.0
 for epoch in range(args.epochs):
-    train(epoch) 
+    # Training
+    loss, acc = train(epoch)
+    
+    # Save training metrics
+    training_log['epochs'].append(epoch)
+    training_log['train_loss'].append(loss)
+    training_log['train_acc'].append(acc)
+    
+    # Every N epochs, run validation and save if better
+    if (epoch + 1) % 2000 == 0:  # Adjust frequency as needed
+        f1_score, mcc = test_dict()
+        
+        # Save best model
+        if f1_score > training_log['best_f1']:
+            training_log['best_f1'] = f1_score
+            training_log['best_mcc'] = mcc
+
+            # print best f1 and mcc
+            print(f"Best F1 score: {training_log['best_f1']:.4f}, Best MCC: {training_log['best_mcc']:.4f}")
+            
+            # # Save model checkpoint
+            # checkpoint = {
+            #     'epoch': epoch,
+            #     'model_state_dict': model.state_dict(),
+            #     'optimizer_state_dict': optimizer.state_dict(),
+            #     'f1_score': f1_score,
+            #     'mcc': mcc,
+            #     'args': vars(args)
+            # }
+            # torch.save(
+            #     checkpoint,
+            #     f'model_checkpoints/model_{run_timestamp}_epoch_{epoch}_f1_{f1_score:.4f}.pt'
+            )
+        
+        # Save current training log
+        # with open(f'training_logs/training_log_{run_timestamp}.json', 'w') as f:
+        #     json.dump(training_log, f, indent=4)
+
 print("Optimization Finished!")
 results = test_dict()
+
+# Save final model and training log
+final_checkpoint = {
+    'epoch': args.epochs,
+    'model_state_dict': model.state_dict(),
+    'optimizer_state_dict': optimizer.state_dict(),
+    'final_f1': results[0],
+    'final_mcc': results[1],
+    'args': vars(args)
+}
+torch.save(
+    final_checkpoint,
+    f'model_checkpoints/model_{run_timestamp}_final.pt'
+)
+
+# Save final training log
+with open(f'training_logs/training_log_{run_timestamp}.json', 'w') as f:
+    json.dump(training_log, f, indent=4)
