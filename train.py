@@ -37,6 +37,8 @@ parser.add_argument('--nb_heads', type=int, default=8, help='Number of head atte
 parser.add_argument('--dropout', type=float, default=0.38, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--alpha', type=float, default=0.2, help='Alpha for the leaky_relu.')
 parser.add_argument('--patience', type=int, default=100, help='Patience')
+parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
+parser.add_argument('--continue_epochs', type=int, default=None, help='Number of epochs to continue training')
 
 args = parser.parse_args()
 # args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -77,7 +79,7 @@ os.makedirs('model_checkpoints', exist_ok=True)
 os.makedirs('training_logs', exist_ok=True)
 
 # Create a unique identifier for this training run
-run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+run_timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
 # Initialize a dictionary to store training metrics
 training_log = {
@@ -89,13 +91,15 @@ training_log = {
     'hyperparameters': vars(args)  # Save all hyperparameters
 }
 
+max_tweet_param = 10
+
 # 390 batches
 def train(epoch): # 777 mod 390 = [0 ]
     t = time.time()
     model.train()
     optimizer.zero_grad()
-    i = np.random.randint(num_samples)
-    train_text = torch.tensor(np.load(train_text_path+str(i).zfill(10)+'.npy'), dtype=torch.float32).cuda()
+    i = epoch % 394
+    train_text = torch.tensor(np.load(train_text_path+str(i).zfill(10)+'.npy')[:, :, :max_tweet_param, :], dtype=torch.float32).cuda()
     train_price = torch.tensor(np.load(train_price_path+str(i).zfill(10)+'.npy'), dtype = torch.float32).cuda()
     train_label = torch.LongTensor(np.load(train_label_path+str(i).zfill(10)+'.npy')).cuda()
     output = model(train_text, train_price, adj)
@@ -103,7 +107,8 @@ def train(epoch): # 777 mod 390 = [0 ]
     acc_train = accuracy(output, torch.max(train_label,1)[1])
     loss_train.backward()
     optimizer.step()
-    
+
+    print(f"Epoch {epoch}, batch {i}, Loss: {loss_train.item()}, Accuracy: {acc_train.item()}")
     return loss_train.item(), acc_train.item()
 
 def test_dict():
@@ -120,7 +125,7 @@ def test_dict():
     li_pred = []
     li_true = []
     for dates in feature_data.keys():
-        test_text = torch.tensor(text_ft_data[dates],dtype=torch.float32).cuda()
+        test_text = torch.tensor(text_ft_data[dates][:, :, :max_tweet_param, :],dtype=torch.float32).cuda()
         test_price = torch.tensor(feature_data[dates],dtype=torch.float32).cuda()
         test_label = torch.LongTensor(true_label[dates]).cuda()
         output = model(test_text, test_price,adj)
@@ -145,23 +150,98 @@ def test_dict():
         pickle.dump(pred_dict, fp, protocol=pickle.HIGHEST_PROTOCOL)
     return iop, mat
 
+def load_checkpoint(checkpoint_path):
+    print(f"Loading checkpoint from {checkpoint_path}")
+    # Load checkpoint to CPU first to avoid potential GPU memory issues
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    
+    # Recreate model with same parameters
+    model = GAT(nfeat=64,
+                nhid=checkpoint['args']['hidden'],
+                nclass=2,
+                dropout=checkpoint['args']['dropout'],
+                nheads=checkpoint['args']['nb_heads'],
+                alpha=checkpoint['args']['alpha'],
+                stock_num=stock_num)
+    
+    # Move model to GPU if available
+    if args.cuda:
+        model = model.cuda()
+    
+    # Load model weights
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Create optimizer
+    optimizer = optim.Adam(model.parameters(),
+                          lr=checkpoint['args']['lr'],
+                          weight_decay=checkpoint['args']['weight_decay'])
+    
+    # Load optimizer state and move to GPU if needed
+    if args.cuda:
+        for key in checkpoint['optimizer_state_dict']:
+            if isinstance(checkpoint['optimizer_state_dict'][key], dict):
+                for k, v in checkpoint['optimizer_state_dict'][key].items():
+                    if isinstance(v, torch.Tensor):
+                        checkpoint['optimizer_state_dict'][key][k] = v.cuda()
+    
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Load training log
+    training_log = {
+        'epochs': [],
+        'train_loss': [],
+        'train_acc': [],
+        'best_f1': checkpoint.get('f1_score', 0.0),
+        'best_mcc': checkpoint.get('mcc', 0.0),
+        'hyperparameters': checkpoint['args']
+    }
+    
+    return model, optimizer, checkpoint['epoch'], training_log
 
-model = GAT(nfeat=64, 
-            nhid=args.hidden, 
-            nclass=2, 
-            dropout=args.dropout, 
-            nheads=args.nb_heads, 
-            alpha=args.alpha,
-            stock_num=stock_num)
-if args.cuda:
-    model.cuda()
-    adj = adj.cuda()
-optimizer = optim.Adam(model.parameters(), 
-                   lr=args.lr, 
-                   weight_decay=args.weight_decay)
+# Modify the main training section
+if args.resume:
+    # Load the checkpoint
+    model, optimizer, start_epoch, training_log = load_checkpoint(args.resume)
+    
+    # Move adj to GPU if needed
+    if args.cuda:
+        adj = adj.cuda()
+    
+    # If continue_epochs is specified, adjust total epochs
+    if args.continue_epochs is not None:
+        args.epochs = start_epoch + args.continue_epochs
+    
+    print(f"Resuming from epoch {start_epoch} to {args.epochs}")
+else:
+    # Normal initialization
+    model = GAT(nfeat=64, 
+                nhid=args.hidden, 
+                nclass=2, 
+                dropout=args.dropout, 
+                nheads=args.nb_heads, 
+                alpha=args.alpha,
+                stock_num=stock_num)
+    if args.cuda:
+        model.cuda()
+        adj = adj.cuda()
+    
+    optimizer = optim.Adam(model.parameters(), 
+                       lr=args.lr, 
+                       weight_decay=args.weight_decay)
+    
+    start_epoch = 0
+    training_log = {
+        'epochs': [],
+        'train_loss': [],
+        'train_acc': [],
+        'best_f1': 0.0,
+        'best_mcc': 0.0,
+        'hyperparameters': vars(args)
+    }
 
-best_f1 = 0.0
-for epoch in range(args.epochs):
+# Training loop
+best_f1 = training_log['best_f1']
+for epoch in range(start_epoch, args.epochs):
     # Training
     loss, acc = train(epoch)
     
@@ -194,7 +274,7 @@ for epoch in range(args.epochs):
             # torch.save(
             #     checkpoint,
             #     f'model_checkpoints/model_{run_timestamp}_epoch_{epoch}_f1_{f1_score:.4f}.pt'
-            )
+            # )
         
         # Save current training log
         # with open(f'training_logs/training_log_{run_timestamp}.json', 'w') as f:

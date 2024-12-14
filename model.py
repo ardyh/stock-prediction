@@ -74,33 +74,55 @@ class GAT(nn.Module):
             self.add_module('attention_{}'.format(i), attention)
 
         self.out_att = GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
+
+        # Add residual projection layer if needed
+        self.residual_proj = [nn.Linear(64, 64) for _ in range(stock_num)]
+        for i, res_proj in enumerate(self.residual_proj):
+            self.add_module('residual_proj{}'.format(i), res_proj)
+
     def forward(self, text_input, price_input, adj):
         li = []
         num_tw = text_input.size(2)
         num_d = price_input.size(1)
         pr_ft = price_input.size(2)
         num_stocks = price_input.size(0)
+        
         for i in range(price_input.size(0)):
+            # Process price input
             x = self.grup[i](price_input[i,:,:].reshape((1,num_d,pr_ft)))
             x = self.attnp[i](*x).reshape((1,64))
-            x = self.layer_normp[i](x).reshape(1,64)
+            price_vector = self.layer_normp[i](x).reshape(1,64)  # Store price vector for residual
+            
+            # Process text input
             han_li1 = []
             for j in range(text_input.size(1)):
                 y = self.tweet_gru[i](text_input[i,j,:,:].reshape(1,num_tw,512))
                 y = self.attn_tweet[i](*y).reshape((1,64))
                 y = self.layer_normt[i](y).reshape(1,64)
                 han_li1.append(y)
+            
             news_vector = torch.Tensor((1,num_d,64))
             news_vector = torch.cat(han_li1)
             text = self.grut[i](news_vector.reshape(1,num_d,64))
             text = self.attnt[i](*text).reshape((1,64))
-            combined = F.tanh(self.bilinear[i](text, x).reshape((1,64)))
+            
+            # Combine text and price features
+            combined = F.tanh(self.bilinear[i](text, price_vector).reshape((1,64)))
+            
+            # Add residual connection with price vector
+            residual = self.residual_proj[i](price_vector)  # Optional projection
+            combined = combined + residual  # Residual connection
+            
             li.append(combined.reshape(1,64))
+        
         ft_vec = torch.Tensor((num_stocks,64))
         ft_vec = torch.cat(li)
         out_1 = F.tanh(self.linear_x[i](ft_vec))
+        
+        # GAT layers
         x = F.dropout(ft_vec, self.dropout, training=self.training)
         x = torch.cat([att(x, adj) for att in self.attentions], dim=1)
         x = F.dropout(x, self.dropout, training=self.training)
         x = F.elu(self.out_att(x, adj))
-        return x+out_1
+        
+        return x + out_1

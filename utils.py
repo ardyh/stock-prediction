@@ -7,7 +7,7 @@ def encode_onehot(labels):
     classes_dict = {c: np.identity(len(classes))[i, :] for i, c in
                     enumerate(classes)}
     labels_onehot = np.array(list(map(classes_dict.get, labels)),
-                             dtype=np.int32)
+                             dtype=np.float32)
     return labels_onehot
 
 
@@ -22,7 +22,7 @@ def load_data():
 
 def normalize_adj(mx):
     """Row-normalize sparse matrix"""
-    rowsum = np.array(mx.sum(1))
+    rowsum = np.array(mx.sum(1), dtype=np.float32)
     r_inv_sqrt = np.power(rowsum, -0.5).flatten()
     r_inv_sqrt[np.isinf(r_inv_sqrt)] = 0.
     r_mat_inv_sqrt = sp.diags(r_inv_sqrt)
@@ -31,7 +31,7 @@ def normalize_adj(mx):
 
 def normalize_features(mx):
     """Row-normalize sparse matrix"""
-    rowsum = np.array(mx.sum(1))
+    rowsum = np.array(mx.sum(1), dtype=np.float32)
     r_inv = np.power(rowsum, -1).flatten()
     r_inv[np.isinf(r_inv)] = 0.
     r_mat_inv = sp.diags(r_inv)
@@ -41,6 +41,6 @@ def normalize_features(mx):
 
 def accuracy(output, labels):
     preds = output.max(1)[1].type_as(labels)
-    correct = preds.eq(labels).double()
+    correct = preds.eq(labels).to(torch.float32)
     correct = correct.sum()
     return correct / len(labels)
